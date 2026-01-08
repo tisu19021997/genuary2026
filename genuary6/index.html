@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Genuary6</title>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.11.11/lib/p5.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-delaunay@6"></script>
+    <link
+      href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css"
+      rel="stylesheet"
+    />
+    <script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #ffffff;
+      }
+      canvas {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      const POLAROID_WIDE_WIDTH = 8.8;
+      const POLAROID_WIDE_HEIGHT = 10.7;
+      const POLAROID_WIDE_IMG_WIDTH = 7.7;
+      const POLAROID_WIDE_IMG_HEIGHT = 7.9;
+
+      const POLAROID_SQUARE_WIDTH = 7.2;
+      const POLAROID_SQUARE_HEIGHT = 8.6;
+      const POLAROID_SQUARE_IMG_WIDTH = 6.2;
+      const POLAROID_SQUARE_IMG_HEIGHT = 6.2;
+
+      const VARIANT = "square";
+      const SCALE = 36;
+
+      let p_w, p_h, p_iw, p_ih;
+      let imgs = [];
+      let polaroids = []; // Array to store polaroid data (image, position, rotation)
+      let draggedPolaroid = null; // Track which polaroid is being dragged
+      let offsetX = 0,
+        offsetY = 0; // Offset for smooth dragging
+      let bgImage;
+
+      // Animation settings for mesh reveal
+      const NUM_RANDOM_POINTS = 80; // Number of random seed points (more = finer, pointillistic feel)
+      const REVEAL_SPEED = 0.15; // How fast each cell reveals
+      const CELL_DELAY = 1; // Frames delay between cells starting to reveal
+
+      // Fade-in animation settings
+      const FADE_IN_SPEED = 0.025; // How fast each polaroid fades in
+      const FADE_IN_DELAY = 15; // Frames delay between each polaroid starting to fade in
+
+      function sizes(variant, scale) {
+        if (variant === "wide") {
+          return [
+            POLAROID_WIDE_WIDTH * scale,
+            POLAROID_WIDE_HEIGHT * scale,
+            POLAROID_WIDE_IMG_WIDTH * scale,
+            POLAROID_WIDE_IMG_HEIGHT * scale,
+          ];
+        }
+        if (variant === "square") {
+          return [
+            POLAROID_SQUARE_WIDTH * scale,
+            POLAROID_SQUARE_HEIGHT * scale,
+            POLAROID_SQUARE_IMG_WIDTH * scale,
+            POLAROID_SQUARE_IMG_HEIGHT * scale,
+          ];
+        }
+      }
+
+      // Generate random mesh using scattered points and d3.Delaunay
+      function generateMesh(imgLeft, imgTop, imgWidth, imgHeight) {
+        let points = [];
+
+        // Add corner points (required for complete coverage)
+        points.push([imgLeft, imgTop]);
+        points.push([imgLeft + imgWidth, imgTop]);
+        points.push([imgLeft, imgTop + imgHeight]);
+        points.push([imgLeft + imgWidth, imgTop + imgHeight]);
+
+        // Add edge points for better coverage
+        let edgePoints = 6;
+        for (let i = 1; i < edgePoints; i++) {
+          let t = i / edgePoints;
+          points.push([imgLeft + t * imgWidth, imgTop]); // top
+          points.push([imgLeft + t * imgWidth, imgTop + imgHeight]); // bottom
+          points.push([imgLeft, imgTop + t * imgHeight]); // left
+          points.push([imgLeft + imgWidth, imgTop + t * imgHeight]); // right
+        }
+
+        // Add random interior points
+        for (let i = 0; i < NUM_RANDOM_POINTS; i++) {
+          points.push([
+            imgLeft + random(0.05, 0.95) * imgWidth,
+            imgTop + random(0.05, 0.95) * imgHeight,
+          ]);
+        }
+
+        // Use d3.Delaunay for triangulation
+        const delaunay = d3.Delaunay.from(points);
+        const triIndices = delaunay.triangles;
+
+        // Convert to triangle objects with vertices
+        let triangles = [];
+        for (let i = 0; i < triIndices.length; i += 3) {
+          let p0 = points[triIndices[i]];
+          let p1 = points[triIndices[i + 1]];
+          let p2 = points[triIndices[i + 2]];
+          triangles.push({
+            vertices: [
+              { x: p0[0], y: p0[1] },
+              { x: p1[0], y: p1[1] },
+              { x: p2[0], y: p2[1] },
+            ],
+          });
+        }
+
+        // Shuffle triangles for random reveal order
+        shuffleArray(triangles);
+
+        // Add progress tracking to each triangle
+        for (let i = 0; i < triangles.length; i++) {
+          triangles[i].progress = 0;
+          triangles[i].revealOrder = i;
+        }
+
+        return triangles;
+      }
+
+      // Fisher-Yates shuffle
+      function shuffleArray(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+          let j = Math.floor(random() * (i + 1));
+          [array[i], array[j]] = [array[j], array[i]];
+        }
+      }
+
+      function loadImages() {
+        let imagesName = [
+          "a-woman-in-the-sun.jpg",
+          "approaching-a-city.jpg",
+          "cape-cod-evening.jpg",
+          "hotel-room.jpg",
+          "newyork-movie.jpg",
+          "chop-suey.jpg",
+          "nighthawks.jpg",
+          "gas.jpg",
+          "road-in-maine.jpg",
+        ];
+        for (let imageName of imagesName) {
+          imgs.push(loadImage(`assets/${imageName}`));
+        }
+      }
+
+      function preload() {
+        loadImages();
+
+        bgImage = loadImage("assets/bg.jpg");
+      }
+
+      // Instagram sizes
+      const INSTAGRAM_SQUARE = { w: 1080, h: 1080 }; // 1:1
+      const INSTAGRAM_PORTRAIT = { w: 1080, h: 1350 }; // 4:5 (recommended)
+      const INSTAGRAM_LANDSCAPE = { w: 1080, h: 566 }; // 1.91:1
+
+      function setup() {
+        [p_w, p_h, p_iw, p_ih] = sizes(VARIANT, SCALE);
+
+        // Create Instagram-sized canvas (use INSTAGRAM_PORTRAIT for max feed visibility)
+        let size = INSTAGRAM_PORTRAIT;
+        let cnv = createCanvas(size.w, size.h);
+        cnv.position((windowWidth - size.w) / 2, (windowHeight - size.h) / 2); // Center canvas
+
+        // Generate random positions and rotations for each polaroid
+        for (let i = 0; i < imgs.length; i++) {
+          // Create graphics buffers
+          let pg = createGraphics(p_w, p_h);
+          let negativeBuffer = createGraphics(p_w, p_h);
+
+          // Calculate image position within polaroid
+          let img_offset_y = p_h / 2 - (p_h - p_iw) / 2 / 2;
+          let img_top = img_offset_y - p_ih / 2;
+          let img_left = (p_w - p_iw) / 2;
+
+          // Generate random mesh for this polaroid
+          let mesh = generateMesh(img_left, img_top, p_iw, p_ih);
+
+          polaroids.push({
+            img: imgs[i],
+            graphics: pg,
+            negativeBuffer: negativeBuffer,
+            x: random(p_w / 2, width - p_w / 2),
+            y: random(p_h / 2, height - p_h / 2),
+            rotation: random(-PI / 12, PI / 12),
+            mesh: mesh, // Array of triangles with progress
+            hoverFrame: 0,
+            fadeIn: 0, // Opacity for fade-in (0 to 1)
+            fadeInOrder: i, // Order for staggered fade-in
+          });
+        }
+      }
+
+      function draw() {
+        // Dark background
+        background(bgImage);
+
+        // Find which polaroid the mouse is over
+        let hoveredPolaroid = null;
+        for (let i = polaroids.length - 1; i >= 0; i--) {
+          let polaroid = polaroids[i];
+          let localX = mouseX - polaroid.x;
+          let localY = mouseY - polaroid.y;
+          let cos_a = cos(-polaroid.rotation);
+          let sin_a = sin(-polaroid.rotation);
+          let rotatedX = localX * cos_a - localY * sin_a;
+          let rotatedY = localX * sin_a + localY * cos_a;
+          if (abs(rotatedX) < p_w / 2 && abs(rotatedY) < p_h / 2) {
+            hoveredPolaroid = polaroid;
+            break;
+          }
+        }
+
+        cursor(
+          hoveredPolaroid || draggedPolaroid ? "assets/cursor4.png" : "default"
+        );
+        if (draggedPolaroid) cursor("grabbing");
+
+        // Draw each polaroid
+        for (let polaroid of polaroids) {
+          // Update fade-in animation - wait for previous to finish
+          let canStart = true;
+          if (polaroid.fadeInOrder > 0) {
+            // Check if previous polaroid has finished fading in
+            let prevPolaroid = polaroids.find(
+              (p) => p.fadeInOrder === polaroid.fadeInOrder - 1
+            );
+            canStart = prevPolaroid && prevPolaroid.fadeIn >= 1;
+          }
+
+          if (canStart) {
+            polaroid.fadeIn = min(1, polaroid.fadeIn + FADE_IN_SPEED);
+          }
+
+          // Skip drawing if not yet visible
+          if (polaroid.fadeIn === 0) continue;
+
+          let pg = polaroid.graphics;
+          let negBuf = polaroid.negativeBuffer;
+          let isHovered = hoveredPolaroid === polaroid;
+          let mesh = polaroid.mesh;
+
+          // Update hover frame counter and mesh progress
+          if (isHovered) {
+            polaroid.hoverFrame++;
+            // Reveal cells randomly based on their reveal order
+            for (let cell of mesh) {
+              let cellStartFrame = cell.revealOrder * CELL_DELAY;
+              if (polaroid.hoverFrame > cellStartFrame) {
+                cell.progress = min(1, cell.progress + REVEAL_SPEED);
+              }
+            }
+          } else {
+            polaroid.hoverFrame = 0;
+            // Fade all cells back to negative
+            for (let cell of mesh) {
+              cell.progress = max(0, cell.progress - REVEAL_SPEED * 0.6);
+            }
+          }
+
+          // Calculate offset for image
+          let img_offset_y = p_h / 2 - (p_h - p_iw) / 2 / 2;
+
+          // === Draw negative version to buffer ===
+          negBuf.clear();
+          negBuf.fill(255);
+          negBuf.noStroke();
+          negBuf.rectMode(CENTER);
+          negBuf.rect(p_w / 2, p_h / 2, p_w, p_h);
+          negBuf.imageMode(CENTER);
+          negBuf.image(polaroid.img, p_w / 2, img_offset_y, p_iw, p_ih);
+          negBuf.filter(INVERT);
+          negBuf.blendMode(MULTIPLY);
+          negBuf.fill(255, 170, 112);
+          negBuf.rectMode(CENTER);
+          negBuf.rect(p_w / 2, img_offset_y, p_iw, p_ih);
+          negBuf.blendMode(BLEND);
+
+          // === Draw main polaroid (developed version) ===
+          pg.clear();
+          pg.fill(255);
+          pg.noStroke();
+          pg.rectMode(CENTER);
+          pg.rect(p_w / 2, p_h / 2, p_w, p_h);
+          pg.imageMode(CENTER);
+          pg.image(polaroid.img, p_w / 2, img_offset_y, p_iw, p_ih);
+
+          // Check if any cell has started developing
+          let allNegative = mesh.every((cell) => cell.progress === 0);
+
+          if (allNegative) {
+            // Draw full negative without mesh - no visible seams
+            pg.imageMode(CORNER);
+            pg.image(negBuf, 0, 0);
+          } else {
+            // === Overlay negative mesh cells with opacity based on reveal ===
+            for (let cell of mesh) {
+              if (cell.progress < 1) {
+                let alpha = map(cell.progress, 0, 1, 255, 0);
+                let v = cell.vertices;
+
+                // Draw clipped negative over this triangle
+                pg.push();
+                pg.clip(() => {
+                  pg.noStroke();
+                  pg.beginShape();
+                  pg.vertex(v[0].x, v[0].y);
+                  pg.vertex(v[1].x, v[1].y);
+                  pg.vertex(v[2].x, v[2].y);
+                  pg.endShape(CLOSE);
+                });
+
+                pg.tint(255, alpha);
+                pg.imageMode(CORNER);
+                pg.image(negBuf, 0, 0);
+                pg.noTint();
+                pg.pop();
+              }
+            }
+          }
+
+          // Draw the graphics buffer to the main canvas with fade-in
+          push();
+          translate(polaroid.x, polaroid.y);
+          rotate(polaroid.rotation);
+          imageMode(CENTER);
+
+          // Apply fade-in opacity
+          let fadeAlpha = polaroid.fadeIn * 255;
+          tint(255, fadeAlpha);
+          image(pg, 0, 0);
+          noTint();
+          pop();
+        }
+      }
+
+      function mousePressed() {
+        // Check polaroids in reverse order (top to bottom)
+        for (let i = polaroids.length - 1; i >= 0; i--) {
+          let polaroid = polaroids[i];
+
+          // Transform mouse coordinates to polaroid's local space
+          let localX = mouseX - polaroid.x;
+          let localY = mouseY - polaroid.y;
+
+          // Rotate point back (inverse rotation)
+          let cos_a = cos(-polaroid.rotation);
+          let sin_a = sin(-polaroid.rotation);
+          let rotatedX = localX * cos_a - localY * sin_a;
+          let rotatedY = localX * sin_a + localY * cos_a;
+
+          // Check if mouse is inside the polaroid rectangle
+          if (abs(rotatedX) < p_w / 2 && abs(rotatedY) < p_h / 2) {
+            draggedPolaroid = polaroid;
+            offsetX = localX;
+            offsetY = localY;
+
+            // Move clicked polaroid to end of array (bring to front)
+            polaroids.splice(i, 1);
+            polaroids.push(polaroid);
+            break;
+          }
+        }
+      }
+
+      function mouseDragged() {
+        if (draggedPolaroid) {
+          draggedPolaroid.x = mouseX - offsetX;
+          draggedPolaroid.y = mouseY - offsetY;
+        }
+      }
+
+      function mouseReleased() {
+        draggedPolaroid = null;
+      }
+    </script>
+  </body>
+</html>

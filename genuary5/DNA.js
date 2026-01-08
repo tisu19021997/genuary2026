@@ -23,7 +23,7 @@ class DNA {
     }
   }
 
-  // Get the gri  d
+  // Get the grid
   getGrid() {
     return this.genes;
   }
