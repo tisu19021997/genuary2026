@@ -34,10 +34,10 @@ const EVOLUTION = {
 
 const LEVEL_COLORS = {
   [LEVEL.EMPTY]: null,
-  [LEVEL.HOUSE]: "rgb(140, 0, 255)", // green
-  [LEVEL.SHOP]: "rgb(143, 1, 119)", // yellow
-  [LEVEL.TOWER]: "rgb(255, 95, 207)", // orange
-  [LEVEL.FACTORY]: "rgb(250, 235, 146)" // red
+  [LEVEL.HOUSE]: "rgb(0, 255, 133)", // neon green
+  [LEVEL.SHOP]: "rgb(0, 194, 255)", // electric cyan
+  [LEVEL.TOWER]: "rgb(255, 45, 255)", // hot magenta
+  [LEVEL.FACTORY]: "rgb(255, 247, 90)" // neon yellow
 };
 
 const SERVICE_RANGE = {
@@ -57,14 +57,15 @@ let hoveredTile = null;
 // Add at top with other globals
 let controls = {
   spawnRate: 2,
-  maxAgents: 50,
+  maxAgents: 1000,
   stickingProb: 0.7,
   evolveRate: 15,
   shadowFactor: 0.5,
   biasedWalkChance: 0.3,
   paused: false,
   decayRate: 20,
-  decayProb: 0.505
+  decayProb: 0.505,
+  seed: 42 // Random seed for reproducible patterns
 };
 
 let sliders = {};
@@ -134,7 +135,7 @@ class Tile {
     if (this.state === STATE_SPACE.CRYSTALLIZED) {
       fill(LEVEL_COLORS[this.level]);
     } else {
-      fill("rgb(69, 6, 147)");
+      fill("rgb(25, 15, 60)"); // Deep violet for empty tiles
     }
 
     beginShape();
@@ -536,6 +537,9 @@ class Grid {
 function setup() {
   createCanvas(CANVAS_SIZE, CANVAS_SIZE);
 
+  // Set random seed for reproducible patterns
+  randomSeed(controls.seed);
+
   size = CELL_RADIUS / 2;
   const colSpacing = 1.5 * size;
   const rowSpacing = sqrt(3) * size;
@@ -548,7 +552,7 @@ function setup() {
   grid = new Grid(rows, cols, size);
   grid.seedCenter();
 
-  setupControls();
+  // setupControls();
 }
 
 function updateHoveredTile() {
@@ -661,7 +665,7 @@ function drawLegend() {
 
 function setupControls() {
   const panelWidth = 210;
-  const panelHeight = 8 * 36 + 70; // 8 sliders based on params array
+  const panelHeight = 8 * 36 + 100; // 8 sliders + seed input + buttons
   const padding = 10;
   const panelX = width - panelWidth - padding;
   const panelY = height - panelHeight - padding;
@@ -696,9 +700,15 @@ function setupControls() {
     sliders[p.key] = { slider, label: p.label, y };
   });
 
+  // Seed input
+  const seedInput = createInput(controls.seed.toString());
+  seedInput.position(panelX + 60, panelY + params.length * lineHeight + 30);
+  seedInput.size(50);
+  seedInput.attribute('placeholder', 'Seed');
+
   // Pause button
   const pauseBtn = createButton("Pause");
-  pauseBtn.position(panelX, panelY + params.length * lineHeight + 30);
+  pauseBtn.position(panelX, panelY + params.length * lineHeight + 60);
   pauseBtn.mousePressed(() => {
     controls.paused = !controls.paused;
     pauseBtn.html(controls.paused ? "Resume" : "Pause");
@@ -706,8 +716,11 @@ function setupControls() {
 
   // Reset button
   const resetBtn = createButton("Reset");
-  resetBtn.position(panelX + 60, panelY + params.length * lineHeight + 30);
+  resetBtn.position(panelX + 60, panelY + params.length * lineHeight + 60);
   resetBtn.mousePressed(() => {
+    const newSeed = parseInt(seedInput.value()) || controls.seed;
+    controls.seed = newSeed;
+    randomSeed(controls.seed);
     grid = new Grid(rows, cols, size);
     grid.seedCenter();
   });
@@ -715,7 +728,7 @@ function setupControls() {
 
 function drawControls() {
   const panelWidth = 210;
-  const panelHeight = Object.keys(sliders).length * 36 + 70;
+  const panelHeight = Object.keys(sliders).length * 36 + 100;
   const padding = 10;
   const panelX = width - panelWidth - padding;
   const panelY = height - panelHeight - padding;
@@ -748,8 +761,14 @@ function drawControls() {
     text(displayVal, panelX + panelWidth - 10, s.y + 10);
   }
 
+  // Seed label
+  fill(180);
+  textAlign(LEFT, CENTER);
+  textSize(11);
+  text("Seed", panelX, panelY + Object.keys(sliders).length * 36 + 40);
+
   // Stats
-  const statsY = panelY + Object.keys(sliders).length * 36 + 55;
+  const statsY = panelY + Object.keys(sliders).length * 36 + 85;
   fill(100);
   textAlign(LEFT, TOP);
   textSize(10);
@@ -823,5 +842,5 @@ function draw() {
 
   drawHUD();
   drawLegend();
-  drawControls(); // Add this
+  // drawControls(); // Add this
 }

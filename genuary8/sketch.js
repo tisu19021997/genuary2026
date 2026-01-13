@@ -37,10 +37,10 @@ const EVOLUTION = {
 
 const LEVEL_COLORS = {
   [LEVEL.EMPTY]: null,
-  [LEVEL.HOUSE]: "rgb(140, 0, 255)", // Purple
-  [LEVEL.SHOP]: "rgb(143, 1, 119)", // Magenta
-  [LEVEL.TOWER]: "rgb(255, 95, 207)", // Pink
-  [LEVEL.FACTORY]: "rgb(250, 235, 146)" // Yellow
+  [LEVEL.HOUSE]: "rgb(0, 255, 133)", // neon green
+  [LEVEL.SHOP]: "rgb(0, 194, 255)", // electric cyan
+  [LEVEL.TOWER]: "rgb(255, 45, 255)", // hot magenta
+  [LEVEL.FACTORY]: "rgb(255, 247, 90)" // neon yellow
 };
 
 const SERVICE_RANGE = {
@@ -67,7 +67,8 @@ let controls = {
   biasedWalkChance: 0.3,
   paused: false,
   decayRate: 20,
-  decayProb: 0.505
+  decayProb: 0.505,
+  seed: 42 // Random seed for reproducible patterns
 };
 
 let sliders = {};
@@ -163,6 +164,10 @@ class Tile {
     // Complete the transition
     if (this.morphProgress >= 1.0) {
       this.level = this.targetLevel;
+      // If morphing to EMPTY, update state now (synchronized with level change)
+      if (this.targetLevel === LEVEL.EMPTY) {
+        this.state = STATE_SPACE.EMPTY;
+      }
     }
   }
 
@@ -181,7 +186,7 @@ class Tile {
     if (geometry.color) {
       fill(geometry.color);
     } else {
-      fill("rgb(69, 6, 147)"); // Empty tiles
+      fill("rgb(25, 15, 60)"); // Empty tiles, deep violet
     }
     noStroke();
 
@@ -540,7 +545,8 @@ class Grid {
     let evolved = 0;
 
     // Collect tiles that should evolve (double-buffer to avoid order dependency)
-    const toEvolve = this.tiles.filter((t) => t.canPromote(this));
+    // Skip tiles that are currently morphing to prevent duplicate promotions
+    const toEvolve = this.tiles.filter((t) => t.morphProgress >= 1.0 && t.canPromote(this));
 
     // Apply evolution with morphing
     for (const tile of toEvolve) {
@@ -594,6 +600,9 @@ class Grid {
 
     for (const tile of this.tiles) {
       if (tile.state !== STATE_SPACE.CRYSTALLIZED) continue;
+      
+      // Skip tiles that are currently morphing to prevent cascade decay
+      if (tile.morphProgress < 1.0) continue;
 
       // Service starvation check
       if (!this.isServedBy(tile) && random() < controls.decayProb) {
@@ -606,8 +615,7 @@ class Grid {
       const newLevel = tile.level - 1;
       if (newLevel < LEVEL.HOUSE) {
         tile.setTargetLevel(LEVEL.EMPTY);
-        // After morph completes, state will be set to EMPTY
-        tile.state = STATE_SPACE.EMPTY;
+        // State will be set to EMPTY when morph completes (in updateMorphing)
       } else {
         tile.setTargetLevel(newLevel);
       }
@@ -626,6 +634,9 @@ function preload() {
 function setup() {
   createCanvas(CANVAS_SIZE, CANVAS_SIZE, WEBGL); // Add WEBGL for 3D rendering
 
+  // Set random seed for reproducible patterns
+  randomSeed(controls.seed);
+
   // Initialize 3D systems
   geometryManager = new GeometryManager();
   cameraController = new CameraController();
@@ -642,7 +653,7 @@ function setup() {
   grid = new Grid(rows, cols, size);
   grid.seedCenter();
 
-  setupControls();
+  // setupControls();
 }
 
 function updateHoveredTile() {
@@ -758,7 +769,7 @@ function drawLegend() {
 
 function setupControls() {
   const panelWidth = 210;
-  const panelHeight = 8 * 36 + 70; // 8 sliders based on params array
+  const panelHeight = 8 * 36 + 100; // 8 sliders + seed input + buttons
   const padding = 10;
   const panelX = width - panelWidth - padding;
   const panelY = height - panelHeight - padding;
@@ -793,9 +804,15 @@ function setupControls() {
     sliders[p.key] = { slider, label: p.label, y };
   });
 
+  // Seed input
+  const seedInput = createInput(controls.seed.toString());
+  seedInput.position(panelX + 60, panelY + params.length * lineHeight + 30);
+  seedInput.size(50);
+  seedInput.attribute('placeholder', 'Seed');
+
   // Pause button
   const pauseBtn = createButton("Pause");
-  pauseBtn.position(panelX, panelY + params.length * lineHeight + 30);
+  pauseBtn.position(panelX, panelY + params.length * lineHeight + 60);
   pauseBtn.mousePressed(() => {
     controls.paused = !controls.paused;
     pauseBtn.html(controls.paused ? "Resume" : "Pause");
@@ -803,8 +820,11 @@ function setupControls() {
 
   // Reset button
   const resetBtn = createButton("Reset");
-  resetBtn.position(panelX + 60, panelY + params.length * lineHeight + 30);
+  resetBtn.position(panelX + 60, panelY + params.length * lineHeight + 60);
   resetBtn.mousePressed(() => {
+    const newSeed = parseInt(seedInput.value()) || controls.seed;
+    controls.seed = newSeed;
+    randomSeed(controls.seed);
     grid = new Grid(rows, cols, size);
     grid.seedCenter();
   });
@@ -812,7 +832,7 @@ function setupControls() {
 
 function drawControls() {
   const panelWidth = 210;
-  const panelHeight = Object.keys(sliders).length * 36 + 70;
+  const panelHeight = Object.keys(sliders).length * 36 + 100;
   const padding = 10;
   const panelX = width - panelWidth - padding;
   const panelY = height - panelHeight - padding;
@@ -846,8 +866,14 @@ function drawControls() {
     text(displayVal, panelX + panelWidth - 10, s.y + 10);
   }
 
+  // Seed label
+  fill(180);
+  textAlign(LEFT, CENTER);
+  textSize(11);
+  text("Seed", panelX, panelY + Object.keys(sliders).length * 36 + 40);
+
   // Stats
-  const statsY = panelY + Object.keys(sliders).length * 36 + 55;
+  const statsY = panelY + Object.keys(sliders).length * 36 + 85;
   fill(100);
   textAlign(LEFT, TOP);
   textSize(10);
@@ -866,7 +892,7 @@ function drawControls() {
 }
 
 function draw() {
-  background(0, 0, 0);
+  background(5, 5, 16); // near-black with a hint of blue
 
   // Update camera
   cameraController.update();
@@ -919,7 +945,7 @@ function draw() {
 
   // Draw ground plane for reference
   push();
-  fill("rgb(69, 6, 147)"); // Light gray ground
+  fill("rgb(25, 15, 60)"); // Deep violet ground
   noStroke();
   translate(centerX, 1, centerZ);
   rotateX(PI / 2);
